@@ -9,6 +9,7 @@ import (
 	"hash/crc32"
 
 	"github.com/btcsuite/btcd/database"
+	"github.com/btcsuite/goleveldb/leveldb"
 )
 
 // The serialized write cursor location format is:
@@ -91,6 +92,15 @@ func reconcileDB(pdb *db, create bool) (database.DB, error) {
 			"at file %d, offset %d", curFileNum, curOffset,
 			wc.curFileNum, wc.curOffset)
 		pdb.store.handleRollback(curFileNum, curOffset)
+
+		// attempt to open leveldb transaction to detect corruption.
+		err := pdb.cache.updateDB(func(ldbTx *leveldb.Transaction) error {
+			return nil
+		})
+		if err != nil {
+			return nil, convertErr("failed to open ldb transaction", err)
+		}
+
 		log.Infof("Database sync complete")
 	}
 

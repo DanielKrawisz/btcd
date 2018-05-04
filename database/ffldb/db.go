@@ -1612,6 +1612,28 @@ func (tx *transaction) close() {
 	}
 }
 
+// Add a record in the block index for the block.  The record
+// includes the location information needed to locate the block
+// on the filesystem as well as the block header since they are
+// so commonly needed.
+func (tx *transaction) storeBlockRecord(hash *chainhash.Hash, location blockLocation) error {
+	blockRow := serializeBlockLoc(location)
+	return tx.blockIdxBucket.Put(hash[:], blockRow)
+}
+
+// storeBlock is intended to be called while the database is being commited
+// and it handles the changes to the leveldb and flat file storage for one
+// block.
+func (tx *transaction) storeBlock(blockData pendingBlock) error {
+	log.Tracef("Storing block %s", blockData.hash)
+	location, err := tx.db.store.writeBlock(blockData.bytes)
+	if err != nil {
+		return err
+	}
+
+	return tx.storeBlockRecord(blockData.hash, location)
+}
+
 // writePendingAndCommit writes pending block data to the flat block files,
 // updates the metadata with their locations as well as the new current write
 // location, and commits the metadata to the memory database cache.  It also
@@ -1637,20 +1659,9 @@ func (tx *transaction) writePendingAndCommit() error {
 	}
 
 	// Loop through all of the pending blocks to store and write them.
+	var err error
 	for _, blockData := range tx.pendingBlockData {
-		log.Tracef("Storing block %s", blockData.hash)
-		location, err := tx.db.store.writeBlock(blockData.bytes)
-		if err != nil {
-			rollback()
-			return err
-		}
-
-		// Add a record in the block index for the block.  The record
-		// includes the location information needed to locate the block
-		// on the filesystem as well as the block header since they are
-		// so commonly needed.
-		blockRow := serializeBlockLoc(location)
-		err = tx.blockIdxBucket.Put(blockData.hash[:], blockRow)
+		err = tx.storeBlock(blockData)
 		if err != nil {
 			rollback()
 			return err
